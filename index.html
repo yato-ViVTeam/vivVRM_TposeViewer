@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VRM T-Pose Viewer</title>
+    <!-- Tailwind CSS (UIデザイン用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons (アイコン用) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+            background-color: #0f172a;
+        }
+        /* 3Dキャンバスのスタイル */
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+        }
+        /* 画面フェードアニメーション */
+        .page-transition {
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+        }
+        .hidden-page {
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.98);
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+        .active-page {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+            z-index: 20;
+        }
+    </style>
+    <!-- Three.js & Three-VRM Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- ========================================== -->
+    <!-- 1. ログイン画面 -->
+    <!-- ========================================== -->
+    <div id="page-login" class="page-transition active-page flex items-center justify-center min-h-screen bg-slate-950 text-white p-4">
+        <div class="bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md">
+            <div class="text-center mb-8">
+                <div class="inline-flex p-3 bg-indigo-600/10 text-indigo-400 rounded-full mb-3">
+                    <i data-lucid="shield-check" class="w-8 h-8"></i>
+                </div>
+                <h1 class="text-2xl font-bold tracking-tight">VRM オンラインビューアー</h1>
+                <p class="text-sm text-slate-400 mt-2">モデル確認システムへログインしてください</p>
+            </div>
+
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">ユーザーID</label>
+                    <input type="text" id="username" required 
+                        class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors" 
+                        placeholder="admin">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">パスワード</label>
+                    <input type="password" id="password" required 
+                        class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors" 
+                        placeholder="••••••••">
+                </div>
+                <div id="login-error" class="hidden text-xs text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded px-3 py-2">
+                    ユーザーIDまたはパスワードが正しくありません。
+                </div>
+                <button type="submit" 
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 mt-6">
+                    <span>ログイン</span>
+                    <i data-lucid="arrow-right" class="w-4 h-4"></i>
+                </button>
+            </form>
+
+            <!-- 開発・確認用の簡易ヒント -->
+            <div class="mt-8 pt-6 border-t border-slate-800/60 text-center">
+                <span class="text-xs text-slate-500 block">【デモ用アカウント情報】</span>
+                <span class="text-xs text-slate-400 mt-1 block">ID: <code class="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400">admin</code> / Pass: <code class="bg-slate-950 px-1.5 py-0.5 rounded text-indigo-400">vrm-test</code></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 2. VRM選択画面 -->
+    <!-- ========================================== -->
+    <div id="page-select" class="page-transition hidden-page flex items-center justify-center min-h-screen bg-slate-950 text-white p-4">
+        <div class="w-full max-w-4xl">
+            <div class="flex justify-between items-center mb-8">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight">VRM モデル選択</h2>
+                    <p class="text-sm text-slate-400 mt-1">確認する3Dアバターモデルを1体選択してください</p>
+                </div>
+                <button id="btn-logout" class="flex items-center gap-2 text-sm text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 px-4 py-2 rounded-lg border border-slate-800 transition-colors">
+                    <i data-lucid="log-out" class="w-4 h-4"></i>
+                    <span>ログアウト</span>
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- モデルAのカード -->
+                <button onclick="loadModel('data/mod/aog/TESTA.vrm', 'TESTA')" 
+                    class="group bg-slate-900 border border-slate-800 hover:border-indigo-500 rounded-2xl p-6 text-left transition-all duration-300 hover:shadow-xl hover:shadow-indigo-500/5 focus:outline-none">
+                    <div class="flex items-start justify-between">
+                        <div class="p-3 bg-indigo-500/10 text-indigo-400 rounded-xl group-hover:bg-indigo-500 group-hover:text-white transition-all">
+                            <i data-lucid="user" class="w-8 h-8"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2.5 py-1 bg-indigo-500/10 text-indigo-400 rounded-full">MODEL A</span>
+                    </div>
+                    <h3 class="text-xl font-bold mt-6 group-hover:text-indigo-400 transition-colors">TESTA.vrm</h3>
+                    <p class="text-sm text-slate-400 mt-2">フォルダパス: <code class="text-xs bg-slate-950 px-1.5 py-0.5 rounded text-slate-300">data/mod/aog/</code></p>
+                    <div class="flex items-center gap-1.5 text-xs text-indigo-400 font-medium mt-6 group-hover:translate-x-1 transition-transform">
+                        <span>ビューワーを起動する</span>
+                        <i data-lucid="chevron-right" class="w-3.5 h-3.5"></i>
+                    </div>
+                </button>
+
+                <!-- モデルBのカード -->
+                <button onclick="loadModel('data/mod/yug/TESTB.vrm', 'TESTB')" 
+                    class="group bg-slate-900 border border-slate-800 hover:border-violet-500 rounded-2xl p-6 text-left transition-all duration-300 hover:shadow-xl hover:shadow-violet-500/5 focus:outline-none">
+                    <div class="flex items-start justify-between">
+                        <div class="p-3 bg-violet-500/10 text-violet-400 group-hover:bg-violet-500 group-hover:text-white rounded-xl transition-all">
+                            <i data-lucid="user" class="w-8 h-8"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2.5 py-1 bg-violet-500/10 text-violet-400 rounded-full">MODEL B</span>
+                    </div>
+                    <h3 class="text-xl font-bold mt-6 group-hover:text-violet-400 transition-colors">TESTB.vrm</h3>
+                    <p class="text-sm text-slate-400 mt-2">フォルダパス: <code class="text-xs bg-slate-950 px-1.5 py-0.5 rounded text-slate-300">data/mod/yug/</code></p>
+                    <div class="flex items-center gap-1.5 text-xs text-violet-400 font-medium mt-6 group-hover:translate-x-1 transition-transform">
+                        <span>ビューワーを起動する</span>
+                        <i data-lucid="chevron-right" class="w-3.5 h-3.5"></i>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 3. ビュー画面 -->
+    <!-- ========================================== -->
+    <div id="page-view" class="page-transition hidden-page">
+        <!-- 3D Canvas がここに挿入される -->
+        <div id="canvas-container"></div>
+
+        <!-- 3D表示中のオーバーレイUI（z-index: 30） -->
+        <div class="absolute inset-0 z-30 pointer-events-none flex flex-col justify-between p-6">
+            <!-- 上部バー -->
+            <div class="flex justify-between items-start">
+                <div class="bg-slate-900/90 backdrop-blur border border-slate-800 p-4 rounded-xl text-white pointer-events-auto">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                        <h4 id="current-model-title" class="font-bold text-base">TESTA.vrm</h4>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-1">T-Pose オンライン確認モード</p>
+                </div>
+
+                <button onclick="backToSelection()" 
+                    class="bg-slate-900/90 hover:bg-slate-800 backdrop-blur border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm pointer-events-auto transition-all">
+                    <span class="bg-slate-800 px-1.5 py-0.5 rounded text-xs text-slate-400">Esc</span>
+                    <span>選択画面に戻る</span>
+                </button>
+            </div>
+
+            <!-- 下部バー（操作ヘルプ） -->
+            <div class="flex flex-col md:flex-row gap-4 justify-between items-end">
+                <div class="bg-slate-900/90 backdrop-blur border border-slate-800 p-4 rounded-xl text-xs text-slate-300 space-y-2 pointer-events-auto max-w-sm">
+                    <span class="font-semibold text-white block mb-1">💡 カメラ操作マニュアル</span>
+                    <div class="flex items-center gap-2">
+                        <kbd class="bg-slate-950 px-2 py-1 rounded text-slate-400 border border-slate-800">ホイール押し込みドラッグ</kbd>
+                        <span>： 360度カメラ回転</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <kbd class="bg-slate-950 px-2 py-1 rounded text-slate-400 border border-slate-800">Shift + ホイール押し込みドラッグ</kbd>
+                        <span>： 平行移動</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <kbd class="bg-slate-950 px-2 py-1 rounded text-slate-400 border border-slate-800">ホイール回転</kbd>
+                        <span>： ズーム (拡大・縮小)</span>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button onclick="resetCamera()" class="bg-slate-900/90 hover:bg-slate-800 backdrop-blur border border-slate-800 text-white p-3 rounded-xl pointer-events-auto transition-all flex items-center gap-2 text-xs">
+                        <i data-lucid="refresh-cw" class="w-4 h-4"></i>
+                        <span>カメラを顔の位置にリセット</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ローディングインジケータ -->
+        <div id="vrm-loader" class="absolute inset-0 bg-slate-950/90 backdrop-blur z-50 flex flex-col items-center justify-center text-white transition-opacity duration-300 pointer-events-auto">
+            <div class="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-6"></div>
+            <h3 class="text-xl font-bold tracking-tight mb-2">VRMデータをロード中...</h3>
+            <div class="w-64 bg-slate-900 rounded-full h-1.5 overflow-hidden border border-slate-800">
+                <div id="load-progress-bar" class="bg-indigo-500 h-full w-0 transition-all duration-100"></div>
+            </div>
+            <p id="load-progress-text" class="text-xs text-slate-400 mt-2">0% 完了</p>
+        </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- 3D描画 & 各種システムロジック -->
+    <!-- ========================================== -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin } from '@pixiv/three-vrm';
+
+        // グローバルUI状態制御
+        window.activePage = 'page-login';
+        window.navigateTo = function(pageId) {
+            document.querySelectorAll('.page-transition').forEach(page => {
+                page.classList.remove('active-page');
+                page.classList.add('hidden-page');
+            });
+            const targetPage = document.getElementById(pageId);
+            if (targetPage) {
+                targetPage.classList.remove('hidden-page');
+                targetPage.classList.add('active-page');
+            }
+            window.activePage = pageId;
+
+            // ビュー画面以外に遷移した場合は3Dループを一時停止
+            if (pageId !== 'page-view') {
+                stopAnimate();
+            }
+        };
+
+        // 1. ログイン認証の簡易ロジック
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const u = document.getElementById('username').value.trim();
+            const p = document.getElementById('password').value.trim();
+
+            // デモ用の簡易ID/Pass認証
+            if (u === 'admin' && p === 'vrm-test') {
+                loginError.classList.add('hidden');
+                navigateTo('page-select');
+            } else {
+                loginError.classList.remove('hidden');
+            }
+        });
+
+        // ログアウト処理
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            navigateTo('page-login');
+        });
+
+        // ESCキーによる戻り操作
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && window.activePage === 'page-view') {
+                backToSelection();
+            }
+        });
+
+        window.backToSelection = function() {
+            navigateTo('page-select');
+            cleanupVrm();
+        };
+
+
+        // ==========================================
+        // 3D グラフィックス制御（Three.js & OrbitControls & VRM）
+        // ==========================================
+        let scene, camera, renderer, controls;
+        let currentVrm = null;
+        let animationFrameId = null;
+        let isAnimating = false;
+        let headPosition = new THREE.Vector3(0, 1.4, 0); // 初期ターゲットのデフォルト値
+
+        // シーン環境の初期化
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = ''; // Canvasの重複を防ぐために初期化
+
+            // 1. シーン
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827); // ダークグレー背景
+
+            // 2. レンダラー
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            // 色再現性を高める
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            container.appendChild(renderer.domElement);
+
+            // 3. カメラ (初期値は仮)
+            camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.1, 20.0);
+            camera.position.set(0, 1.4, 2.5);
+
+            // 4. マウス操作コントロール (OrbitControls)
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            // ズームは常時可能に
+            controls.enableZoom = true;
+            controls.minDistance = 0.3;
+            controls.maxDistance = 10.0;
+
+            // 【重要】マウス操作系の再マッピング仕様
+            controls.mouseButtons = {
+                LEFT: THREE.MOUSE.NONE,      // 左ドラッグを無効化（誤操作防止）
+                MIDDLE: THREE.MOUSE.ROTATE,  // マウスホイール押し込みドラッグで回転
+                RIGHT: THREE.MOUSE.NONE      // 右ドラッグを無効化
+            };
+            // 備考：OrbitControlsは、Shift + 指定されたROTATEボタン（ここではMIDDLE）を押すことで自動的にPAN（平行移動）になります。
+            controls.enablePan = true; 
+
+            // 5. ライティング
+            // 空間全体を照らす環境光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+            scene.add(ambientLight);
+
+            // モデルの立体感を出す平行光源 (正面と背面)
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            mainLight.position.set(2.0, 4.0, 3.0);
+            scene.add(mainLight);
+
+            const backLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            backLight.position.set(-2.0, 2.0, -3.0);
+            scene.add(backLight);
+
+            // 床面にうっすらとしたグリッドを敷く（サイズ感の補助用）
+            const gridHelper = new THREE.GridHelper(10, 20, 0x374151, 0x1f2937);
+            gridHelper.position.y = 0;
+            scene.add(gridHelper);
+        }
+
+        // 既存のVRMモデルを破棄してメモリリークを防ぐ
+        function cleanupVrm() {
+            if (currentVrm) {
+                scene.remove(currentVrm.scene);
+                currentVrm.scene.traverse((object) => {
+                    if (object.isMesh) {
+                        object.geometry.dispose();
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach((mat) => mat.dispose());
+                        } else {
+                            object.material.dispose();
+                        }
+                    }
+                });
+                currentVrm = null;
+            }
+        }
+
+        // カメラ位置・ターゲットのリセット
+        window.resetCamera = function() {
+            if (!controls) return;
+            // 読み込んだVRMの顔の位置を原点に
+            controls.target.copy(headPosition);
+            // カメラを顔の正面の少し上（斜めから見下ろす感じ）に配置
+            camera.position.set(headPosition.x, headPosition.y + 0.05, headPosition.z + 1.2);
+            controls.update();
+        };
+
+        // VRMの読み込みと表示
+        window.loadModel = function(modelUrl, modelName) {
+            // ビュー画面に遷移
+            navigateTo('page-view');
+            
+            // 3D空間の初期化 (まだ作られていない場合)
+            if (!scene) {
+                initThree();
+            }
+
+            // タイトル更新
+            document.getElementById('current-model-title').innerText = `${modelName}.vrm`;
+
+            // ローディング画面のリセット
+            const loaderScreen = document.getElementById('vrm-loader');
+            const progressBar = document.getElementById('load-progress-bar');
+            const progressText = document.getElementById('load-progress-text');
+            
+            loaderScreen.style.opacity = '1';
+            loaderScreen.style.pointerEvents = 'auto';
+            progressBar.style.width = '0%';
+            progressText.innerText = '0% 完了';
+
+            // 既存のモデルの破棄
+            cleanupVrm();
+
+            // GLTFLoaderとVRMLoaderPluginのセットアップ
+            const loader = new GLTFLoader();
+            loader.register((parser) => new VRMLoaderPlugin(parser));
+
+            loader.load(
+                modelUrl,
+                (gltf) => {
+                    const vrm = gltf.userData.vrm;
+                    currentVrm = vrm;
+
+                    // シーンに追加（標準状態がTポーズになります）
+                    scene.add(vrm.scene);
+
+                    // VRMは標準仕様で後ろ（Zマイナス方向）を向いているため、Y軸を180度回転させて正面を向ける
+                    vrm.scene.rotation.y = Math.PI;
+
+                    // ワールドマトリックスの即時更新を行い座標を確定させる
+                    vrm.scene.updateMatrixWorld(true);
+
+                    // --- 顔（Head）ボーン位置の自動検知 ---
+                    let foundHead = false;
+                    headPosition.set(0, 1.4, 0); // フォールバック用(標準的なモデルの顔の高さ)
+
+                    if (vrm.humanoid) {
+                        // VRM humanoid から 'head' ボーンを検出
+                        const headBone = vrm.humanoid.getNormalizedBoneNode('head');
+                        if (headBone) {
+                            headBone.getWorldPosition(headPosition);
+                            foundHead = true;
+                        }
+                    }
+
+                    // 万が一ボーンから頭の位置を取得できない場合のフォールバック（境界ボックスの上部をターゲットにする）
+                    if (!foundHead) {
+                        const box = new THREE.Box3().setFromObject(vrm.scene);
+                        const size = new THREE.Vector3();
+                        box.getSize(size);
+                        const center = new THREE.Vector3();
+                        box.getCenter(center);
+                        // 通常、顔は身長の上から約10%付近
+                        headPosition.set(center.x, box.max.y - (size.y * 0.1), center.z);
+                    }
+
+                    // カメラとターゲットを自動リセット
+                    resetCamera();
+
+                    // ローディング非表示
+                    loaderScreen.style.opacity = '0';
+                    loaderScreen.style.pointerEvents = 'none';
+
+                    // アニメーションループ開始
+                    startAnimate();
+                },
+                (progress) => {
+                    if (progress.total > 0) {
+                        const percent = Math.round((progress.loaded / progress.total) * 100);
+                        progressBar.style.width = `${percent}%`;
+                        progressText.innerText = `${percent}% 完了`;
+                    } else {
+                        // サイズが取得できない場合のフォールバック
+                        progressText.innerText = '読み込み中...';
+                    }
+                },
+                (error) => {
+                    console.error('VRMのロードエラー:', error);
+                    progressText.innerHTML = '<span class="text-rose-500 font-semibold">読み込みに失敗しました。</span><br><span class="text-xs text-slate-400 mt-1 block">フォルダ内にVRMファイルが正しく存在しているかご確認ください。</span>';
+                    // エラー時に戻れるよう1.5秒後に自動で戻るか、Escボタンをアクティブにする
+                }
+            );
+        };
+
+        // アニメーションループ制御
+        const clock = new THREE.Clock();
+
+        function startAnimate() {
+            if (!isAnimating) {
+                isAnimating = true;
+                animate();
+            }
+        }
+
+        function stopAnimate() {
+            isAnimating = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        }
+
+        function animate() {
+            if (!isAnimating) return;
+            animationFrameId = requestAnimationFrame(animate);
+
+            const deltaTime = clock.getDelta();
+
+            // VRMモデルの自動アップデート（表情ブレンドシェイプなどの更新用）
+            if (currentVrm) {
+                currentVrm.update(deltaTime);
+            }
+
+            // カメラ操作のダンピング反映
+            if (controls) {
+                controls.update();
+            }
+
+            // 描画
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // 画面サイズ変更の検知
+        window.addEventListener('resize', () => {
+            if (!renderer || !camera) return;
+            const container = document.getElementById('canvas-container');
+            if (container) {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            }
+        });
+
+        // Lucideアイコンのイニシャライズ
+        lucide.createIcons();
+    </script>
+</body>
+</html>
