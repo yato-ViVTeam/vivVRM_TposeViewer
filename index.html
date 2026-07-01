@@ -118,16 +118,13 @@
             </div>
 
             <!-- 操作ヘルプとリセット -->
-            <div class="flex flex-col md:flex-row gap-3 justify-between items-end">
-                <div class="bg-slate-900/90 backdrop-blur border border-slate-800 p-3 md:p-4 rounded-xl text-xs text-slate-300 space-y-1.5 pointer-events-auto max-w-xs md:max-w-sm hidden sm:block shadow-lg">
-                    <span class="font-semibold text-white block mb-1">💡 カメラ操作</span>
-                    <div><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400">ドラッグ</kbd>：回転</div>
-                    <div><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400">Shift + ドラッグ</kbd>：平行移動</div>
-                    <div><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400">スクロール / ピンチ</kbd>：ズーム</div>
+            <div class="flex flex-row gap-2 md:gap-3 justify-between items-end">
+                <div id="camera-hints" class="bg-slate-900/90 backdrop-blur border border-slate-800 p-2.5 md:p-4 rounded-xl text-[10px] md:text-xs text-slate-300 space-y-1.5 pointer-events-auto shadow-lg max-w-[200px] md:max-w-sm">
+                    <!-- JSでデバイスに応じて書き換えられます -->
                 </div>
 
-                <button onclick="resetCamera()" class="bg-slate-900/90 hover:bg-slate-800 backdrop-blur border border-slate-800 text-white p-3 rounded-xl pointer-events-auto transition-all flex items-center gap-2 text-xs shadow-lg">
-                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                <button onclick="resetCamera()" class="bg-slate-900/90 hover:bg-slate-800 backdrop-blur border border-slate-800 text-white p-2.5 md:p-3 rounded-xl pointer-events-auto transition-all flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs shadow-lg h-fit">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5 md:w-4 md:h-4"></i>
                     <span>カメラリセット</span>
                 </button>
             </div>
@@ -149,6 +146,38 @@
         import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 
         lucide.createIcons();
+
+        // ----------------------------------------------------
+        // デバイス判定とUI初期化
+        // ----------------------------------------------------
+        const isTouchDevice = (('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (navigator.msMaxTouchPoints > 0));
+
+        function updateCameraHints() {
+            const hintsEl = document.getElementById('camera-hints');
+            if (!hintsEl) return;
+            
+            if (isTouchDevice) {
+                hintsEl.innerHTML = `
+                    <span class="font-semibold text-white block mb-1.5">💡 操作マニュアル</span>
+                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">1本指ドラッグ</kbd><span>：回転</span></div>
+                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">2本指ドラッグ</kbd><span>：移動</span></div>
+                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ピンチ</kbd><span>：ズーム</span></div>
+                `;
+            } else {
+                hintsEl.innerHTML = `
+                    <span class="font-semibold text-white block mb-1.5">💡 操作マニュアル</span>
+                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール押込み</kbd><span>：回転</span></div>
+                    <div class="flex justify-between items-center gap-1">
+                        <div>
+                            <kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">Shift</kbd> <span class="text-slate-500">+</span> <kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">押込み</kbd>
+                        </div>
+                        <span>：移動</span>
+                    </div>
+                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール回転</kbd><span>：ズーム</span></div>
+                `;
+            }
+        }
+        updateCameraHints();
 
         // ----------------------------------------------------
         // 簡易セキュリティ（ドラッグによる画像保存防止など）
@@ -277,20 +306,47 @@
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
             controls.enableZoom = true;
-            controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+            // ==========================================
+            // 操作設定の最適化
+            // ==========================================
+            // PC: 左/右クリックを無効化し、マウスホイール押し込み(MIDDLE)に回転を割り当て
+            controls.mouseButtons = { 
+                LEFT: THREE.MOUSE.NONE, 
+                MIDDLE: THREE.MOUSE.ROTATE, 
+                RIGHT: THREE.MOUSE.NONE 
+            };
+            
+            // スマホ: 1本指で回転、2本指で移動＆ズーム
+            controls.touches = {
+                ONE: THREE.TOUCH.ROTATE,
+                TWO: THREE.TOUCH.DOLLY_PAN
+            };
             
             // ==========================================
             // ライティングの修正 (VRM/MToonに最適な設定)
             // ==========================================
-            // AmbientLight(環境光)はMToonの影色(ShadeColor)を打ち消して白飛びの原因になるため削除。
-            // 太陽光にあたる DirectionalLight 1灯のみで陰影をパキッと出します。
             const mainLight = new THREE.DirectionalLight(0xffffff, Math.PI);
-            // 少し斜め上、正面側から光を当てる
             mainLight.position.set(1.0, 1.0, 1.0).normalize();
             scene.add(mainLight);
 
             scene.add(new THREE.GridHelper(10, 20, 0x374151, 0x1f2937));
         }
+
+        // ----------------------------------------------------
+        // Shiftキーによるカメラ操作の切り替え (回転 ⇔ 移動)
+        // ----------------------------------------------------
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Shift' && controls) {
+                controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'Shift' && controls) {
+                controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+            }
+        });
+
 
         function cleanupVrm() {
             if (currentVrm) {
