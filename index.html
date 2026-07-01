@@ -150,13 +150,14 @@
         // ----------------------------------------------------
         // デバイス判定とUI初期化
         // ----------------------------------------------------
-        const isTouchDevice = (('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (navigator.msMaxTouchPoints > 0));
+        // より確実なスマホ・タブレット判定 (ユーザーエージェントベース)
+        const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         function updateCameraHints() {
             const hintsEl = document.getElementById('camera-hints');
             if (!hintsEl) return;
             
-            if (isTouchDevice) {
+            if (isMobile) {
                 hintsEl.innerHTML = `
                     <span class="font-semibold text-white block mb-1.5">💡 操作マニュアル</span>
                     <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">1本指ドラッグ</kbd><span>：回転</span></div>
@@ -167,13 +168,13 @@
                 hintsEl.innerHTML = `
                     <span class="font-semibold text-white block mb-1.5">💡 操作マニュアル</span>
                     <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール押込み</kbd><span>：回転</span></div>
-                    <div class="flex justify-between items-center gap-1">
-                        <div>
+                    <div class="flex justify-between items-center gap-1 mt-1.5">
+                        <div class="flex items-center gap-1">
                             <kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">Shift</kbd> <span class="text-slate-500">+</span> <kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">押込み</kbd>
                         </div>
                         <span>：移動</span>
                     </div>
-                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール回転</kbd><span>：ズーム</span></div>
+                    <div class="flex justify-between items-center mt-1.5"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール回転</kbd><span>：ズーム</span></div>
                 `;
             }
         }
@@ -200,7 +201,6 @@
         window.backToMain = function() {
             navigateTo('page-main');
             cleanupVrm();
-            // 戻った際にファイル入力をリセット
             document.getElementById('file-input-view').value = '';
         };
 
@@ -252,7 +252,6 @@
             const password = document.getElementById('view-password').value;
             if (!password) { 
                 alert('先に復号パスワードを入力してください。'); 
-                // ファイル選択をキャンセルした扱いにする
                 fileInput.value = '';
                 return; 
             }
@@ -263,7 +262,6 @@
             reader.onload = function(e) {
                 let finalBuffer = e.target.result;
                 
-                // .ViVionDat 拡張子の場合はパスワードで復号処理を行う
                 if (file.name.toLowerCase().endsWith('.viviondat')) {
                     finalBuffer = processCryptoData(finalBuffer, password);
                 }
@@ -288,13 +286,12 @@
             container.innerHTML = '';
             
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x111827); // 背景色をUIに合わせる
+            scene.background = new THREE.Color(0x111827);
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
             renderer.setSize(container.clientWidth, container.clientHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
             
-            // 色味を正しく出力するための設定 (白飛び・くすみ防止)
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.NoToneMapping; 
             
@@ -307,9 +304,6 @@
             controls.dampingFactor = 0.05;
             controls.enableZoom = true;
 
-            // ==========================================
-            // 操作設定の最適化
-            // ==========================================
             // PC: 左/右クリックを無効化し、マウスホイール押し込み(MIDDLE)に回転を割り当て
             controls.mouseButtons = { 
                 LEFT: THREE.MOUSE.NONE, 
@@ -323,9 +317,6 @@
                 TWO: THREE.TOUCH.DOLLY_PAN
             };
             
-            // ==========================================
-            // ライティングの修正 (VRM/MToonに最適な設定)
-            // ==========================================
             const mainLight = new THREE.DirectionalLight(0xffffff, Math.PI);
             mainLight.position.set(1.0, 1.0, 1.0).normalize();
             scene.add(mainLight);
@@ -334,19 +325,25 @@
         }
 
         // ----------------------------------------------------
-        // Shiftキーによるカメラ操作の切り替え (回転 ⇔ 移動)
+        // Shiftキーによるカメラ操作の切り替え (確実な判定方法へ修正)
         // ----------------------------------------------------
+        // ※Shiftを押してから、中ボタンをドラッグすると平行移動になります。
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'Shift' && controls) {
+            if (e.shiftKey && controls) {
                 controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
             }
         });
         window.addEventListener('keyup', (e) => {
-            if (e.key === 'Shift' && controls) {
+            if (!e.shiftKey && controls) {
                 controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
             }
         });
-
+        // ブラウザからフォーカスが外れた場合のリセット（Shift押したままウィンドウ切り替え対策）
+        window.addEventListener('blur', () => {
+            if (controls) {
+                controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+            }
+        });
 
         function cleanupVrm() {
             if (currentVrm) {
@@ -396,7 +393,6 @@
                     vrm.scene.rotation.y = Math.PI;
                     vrm.scene.updateMatrixWorld(true);
 
-                    // 顔の位置検知
                     let foundHead = false;
                     headPosition.set(0, 1.4, 0);
                     if (vrm.humanoid) {
