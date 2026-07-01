@@ -150,7 +150,6 @@
         // ----------------------------------------------------
         // デバイス判定とUI初期化
         // ----------------------------------------------------
-        // より確実なスマホ・タブレット判定 (ユーザーエージェントベース)
         const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         function updateCameraHints() {
@@ -167,14 +166,9 @@
             } else {
                 hintsEl.innerHTML = `
                     <span class="font-semibold text-white block mb-1.5">💡 操作マニュアル</span>
-                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール押込み</kbd><span>：回転</span></div>
-                    <div class="flex justify-between items-center gap-1 mt-1.5">
-                        <div class="flex items-center gap-1">
-                            <kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">Shift</kbd> <span class="text-slate-500">+</span> <kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">押込み</kbd>
-                        </div>
-                        <span>：移動</span>
-                    </div>
-                    <div class="flex justify-between items-center mt-1.5"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">ホイール回転</kbd><span>：ズーム</span></div>
+                    <div class="flex justify-between items-center"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">左ドラッグ</kbd><span>：回転</span></div>
+                    <div class="flex justify-between items-center mt-1.5"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">右ドラッグ</kbd><span>：移動</span></div>
+                    <div class="flex justify-between items-center mt-1.5"><kbd class="bg-slate-950 px-1.5 py-0.5 rounded text-slate-400 border border-slate-800">スクロール</kbd><span>：ズーム</span></div>
                 `;
             }
         }
@@ -304,11 +298,11 @@
             controls.dampingFactor = 0.05;
             controls.enableZoom = true;
 
-            // PC: 左/右クリックを無効化し、マウスホイール押し込み(MIDDLE)に回転を割り当て
+            // 操作を業界標準 (左:回転, 右:移動, ホイール:ズーム) に設定
             controls.mouseButtons = { 
-                LEFT: THREE.MOUSE.NONE, 
-                MIDDLE: THREE.MOUSE.ROTATE, 
-                RIGHT: THREE.MOUSE.NONE 
+                LEFT: THREE.MOUSE.ROTATE, 
+                MIDDLE: THREE.MOUSE.DOLLY, 
+                RIGHT: THREE.MOUSE.PAN 
             };
             
             // スマホ: 1本指で回転、2本指で移動＆ズーム
@@ -323,27 +317,6 @@
 
             scene.add(new THREE.GridHelper(10, 20, 0x374151, 0x1f2937));
         }
-
-        // ----------------------------------------------------
-        // Shiftキーによるカメラ操作の切り替え (確実な判定方法へ修正)
-        // ----------------------------------------------------
-        // ※Shiftを押してから、中ボタンをドラッグすると平行移動になります。
-        window.addEventListener('keydown', (e) => {
-            if (e.shiftKey && controls) {
-                controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
-            }
-        });
-        window.addEventListener('keyup', (e) => {
-            if (!e.shiftKey && controls) {
-                controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
-            }
-        });
-        // ブラウザからフォーカスが外れた場合のリセット（Shift押したままウィンドウ切り替え対策）
-        window.addEventListener('blur', () => {
-            if (controls) {
-                controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
-            }
-        });
 
         function cleanupVrm() {
             if (currentVrm) {
